@@ -1,0 +1,527 @@
+WVD ODI Enterprise Install
+Starting Infrastructure Installer
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ODI 12.2.1.3.0 Infrastructure Installation is now completed.
+ 
+ODI 12.2.1.3.0 Integrator Installation Steps
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ODI 12.2.1.3.0 Integrator Installation is now completed.
+ 
+ODI 12.2.1.3.0 RCU Repository Installation
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+The ODI Master and Work Repos have been skipped as they were already loaded in xepdb1 under “odiadm”.
+ 
+ 
+Password is “odiadm”
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+RCU is now completed.
+Database Additions
+Add new tablespace POC_ODI_USER:
+The ODI workspace is defined in the Master and Work Repo under a new tablespace POC_ODI_USER:
+create tablespace POC_ODI_USER datafile 'C:\ORACLE\PRODUCT\18.0.0\ORADATA\XE\XEPDB1\POC_ODI_USER.DBF' size 1000M;
+ 
+Create a POC_ODI_REPO user
+Use POC_ODI_REPO user instead of “odiadm” for Master and Work Repo and update it later from odiadm.
+Here we used odiadm as the Master and Work Repo schema:
+DROP USER POC_ODI_REPO CASCADE;
+
+CREATE USER POC_ODI_REPO
+  IDENTIFIED BY poc_odi_repo
+  HTTP DIGEST DISABLE
+  DEFAULT TABLESPACE POC_ODI_USER
+  TEMPORARY TABLESPACE TEMP
+  PROFILE DEFAULT
+  ACCOUNT UNLOCK;
+
+-- 3 Roles for POC_ODI_REPO 
+GRANT CONNECT TO POC_ODI_REPO;
+GRANT DBA TO POC_ODI_REPO;
+GRANT RESOURCE TO POC_ODI_REPO;
+ALTER USER POC_ODI_REPO DEFAULT ROLE ALL;
+
+-- 4 System Privileges for POC_ODI_REPO 
+GRANT CREATE SEQUENCE TO POC_ODI_REPO;
+GRANT CREATE SESSION TO POC_ODI_REPO;
+GRANT CREATE TABLE TO POC_ODI_REPO;
+GRANT UNLIMITED TABLESPACE TO POC_ODI_REPO;
+
+-- 1 Tablespace Quota for POC_ODI_REPO 
+ALTER USER POC_ODI_REPO QUOTA UNLIMITED ON POC_ODI_USER;
+
+-- 2 Object Privileges for POC_ODI_REPO 
+GRANT EXECUTE ON SYS.DBMS_LOCK TO POC_ODI_REPO;
+GRANT SELECT ON SYSTEM.SCHEMA_VERSION_REGISTRY TO POC_ODI_REPO;
+
+WebLogic Server Domain Creation
+ 
+
+ 
+ 
+ 
+ 
+ 
+ 
+Password is “weblogic1”.
+ 
+ 
+Password is “odiadm”
+ 
+Password is “odiadm” for all even the modified Master and Work Schemas.
+ 
+ 
+Passwords are “supervisor” and “weblogic1”.
+ 
+ 
+ 
+Password is “weblogic1”.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+You are done with domain creation and its support schemas.
+ 
+
+ODI Framework Database Extensions
+F_GET_NOTIFICATION
+CREATE OR REPLACE FUNCTION ODIADM.F_GET_NOTIFICATION
+(
+    p_job_name  IN  VARCHAR2,
+    p_note_id   IN  NUMBER      DEFAULT 1,
+    p_delim     IN  VARCHAR2    DEFAULT '*',
+    p_short     IN  VARCHAR2    DEFAULT 'Y'
+) RETURN VARCHAR2 AS
+
+    v_delim         VARCHAR2(150 char) := NULL;
+    v_data          VARCHAR2(32767 char) := NULL;
+      
+    CURSOR c1 IS
+        SELECT
+            s.sess_beg,
+            s.sess_no,
+            CASE WHEN p_short = 'Y'
+                THEN
+                    DECODE(INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), 'Session Start:'),
+                        0, CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)),
+                        SUBSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)),
+                            INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), 'Session Start:'),
+                            INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), '** End of job **', -1)
+                                - INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), 'Session Start:')
+                        )
+                    )
+                ELSE
+                    CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000))
+            END note
+            FROM
+                snp_session         s,
+                snp_lpi_step_log    l
+            WHERE
+                s.sess_no = l.sess_no
+                AND l.i_lp_inst =
+                    (
+                        SELECT MAX(i_lp_inst)
+                            FROM snp_lp_inst
+                            WHERE load_plan_name = 'lp_' ||
+                                SUBSTR(p_job_name,
+                                    DECODE(UPPER(SUBSTR(p_job_name, 1, 3)),
+                                        'SCN', 9,
+                                        'PKG', 5,
+                                        1)
+                                    )
+                    )
+        UNION ALL
+        SELECT
+            sess_beg,
+            sess_no,
+            CASE WHEN p_short = 'Y'
+                THEN
+                    COALESCE(SUBSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)),
+                        INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), 'Session Start:'),
+                        INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), '** End of job **', -1)
+                            - INSTR(CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000)), 'Session Start:')
+                        ), CHR(10) || '** End of leaf child **' || CHR(10))
+                ELSE CAST(DBMS_LOB.SUBSTR(startup_variables, 4000, 1) AS VARCHAR2(4000))
+            END note
+            FROM snp_session
+            START WITH parent_sess_no = (SELECT MAX(sess_no) FROM snp_session WHERE sess_name = p_job_name AND parent_sess_no IS NULL)
+            CONNECT BY PRIOR sess_no = parent_sess_no
+        ORDER BY sess_beg, sess_no;
+
+
+BEGIN
+    BEGIN
+        FOR I in 1..(136 / LENGTH(p_delim))
+        LOOP
+            v_delim := v_delim || p_delim;
+        END LOOP;
+        v_delim := v_delim || CHR(10) || CHR(10);
+        v_data := v_delim;
+        
+        FOR J in c1
+        LOOP
+            IF LENGTH(v_data) + LENGTH(J.note) + LENGTH(v_delim) < 32767
+            THEN
+                v_data := v_data || J.note || CHR(10) || v_delim;
+            ELSE
+                v_data := v_data || '...MORE...' || CHR(10);
+                EXIT;
+            END IF;
+        END LOOP;
+    END;
+
+    RETURN TRIM(SUBSTR(v_data, (p_note_id - 1) * 4000 + 1, 4000));
+
+    EXCEPTION WHEN OTHERS THEN RETURN 'NOTIFICATION ERROR: ' || SQLERRM;
+ 
+END;
+
+F_GET_STATS
+CREATE OR REPLACE FUNCTION POC_ODI_REPO.F_GET_STATS
+(
+    p_sess_no  IN  NUMBER
+) RETURN VARCHAR2 AS
+
+    c_step_size     CONSTANT NUMBER := 70;
+    v_data          VARCHAR2(32500) := NULL;
+    v_last_step     VARCHAR2(2000)  := '???';
+    v_last_sess_no  NUMBER          := -1;
+    v_tot_duration  NUMBER;
+    v_sess_beg_dt   DATE;
+    v_sess_end_dt   DATE;
+
+    CURSOR c1 IS
+        SELECT
+            COALESCE(D.parent_sess_no, 0) root,
+            COALESCE(D.parent_sess_no, D.sess_no) parent_sess_no,
+            D.sess_no,
+            D.sess_name,
+            C.nno,
+            C.step_type,
+            C.step_name,
+            SUM(B.nb_row) AS rwx,
+            SUM(B.nb_ins) AS ins,
+            SUM(B.nb_upd) AS upd,
+            SUM(B.nb_del) AS dlt,
+            SUM(B.nb_err) AS err,
+            MIN(B.task_beg) task_beg,
+            MAX(B.task_end) task_end,
+            TO_NUMBER(MAX(B.task_end) - MIN(B.task_beg)) * 86400 AS dur
+            FROM
+                snp_sb_task        A,
+                snp_sess_task_log  B,
+                snp_sb_step        C,
+                snp_session        D
+            WHERE
+                p_sess_no IN (D.sess_no, D.parent_sess_no)
+                AND B.sess_no = D.sess_no
+                AND A.sb_no = B.sb_no       
+                AND A.nno = B.nno
+                AND A.scen_task_no = B.scen_task_no
+                AND C.sb_no = B.sb_no       
+                AND C.nno = B.nno
+                AND (
+                    C.step_type IN ('M', 'T')  -- ('Mapping', 'Procedure')
+                    OR (C.step_type = 'SE' AND C.step_name <> 'Delete Zero Len Files')  -- Exclude
+                )
+                AND A.task_type <> 'L'
+                AND (C.step_name <> 'prc_Log_Process')  -- No Log Process
+                AND COALESCE(D.parent_sess_no, 0) = 0  -- Parent Only
+            GROUP BY
+                D.parent_sess_no,
+                D.sess_no,
+                D.sess_name,
+                C.nno,
+                C.step_type,
+                C.step_name
+            ORDER BY
+                root,
+                D.sess_no,
+                D.sess_name,
+                C.nno,
+                C.step_type,
+                C.step_name;
+
+BEGIN  
+    SELECT
+        GREATEST(SUM(task_dur),1),
+        MIN(task_beg),
+        MAX(task_end)
+        INTO
+            v_tot_duration,
+            v_sess_beg_dt,
+            v_sess_end_dt
+        FROM snp_sess_task_log
+        WHERE sess_no = p_sess_no;
+    
+    FOR rec IN c1 LOOP
+        IF (v_data IS NULL)
+        THEN
+            v_last_step := rec.step_name;
+            v_data :=           'Session Number:   ' || CHR(9)  || rec.sess_no   || CHR(10);    
+            v_data := v_data || 'Session Name:     ' || CHR(9)  || rec.sess_name || CHR(10) || CHR(10);
+            v_data := v_data || 'Session Start:    ' || CHR(9)  || TO_CHAR(v_sess_beg_dt,  'YYYY/MM/DD HH:MI:SS PM') || CHR(10);
+            v_data := v_data || 'Session End:      ' || CHR(9)  || TO_CHAR(v_sess_end_dt,  'YYYY/MM/DD HH:MI:SS PM') || CHR(10) || CHR(10);
+            v_data := v_data || 'Session Duration: ' || CHR(9)  || TO_CHAR(v_tot_duration, '99,990') || ' (seconds)' || CHR(10) || CHR(10);
+ 
+            v_data := v_data || RPAD('  Step', c_step_size, ' ') ||
+                                LPAD('Duration', 11, ' ') || 
+                                LPAD('Row', 11, ' ') || 
+                                LPAD('Insert', 11, ' ') || 
+                                LPAD('Update', 11, ' ') || 
+                                LPAD('Delete', 11, ' ') || 
+                                LPAD('Error', 11, ' ') || CHR(10);
+
+            v_data := v_data || RPAD('  -',  c_step_size, '-') ||
+                                RPAD('  -',  11, '-') ||
+                                RPAD('  -',  11, '-') ||
+                                RPAD('  -',  11, '-') ||
+                                RPAD('  -',  11, '-') ||
+                                RPAD('  -',  11, '-') ||
+                                RPAD('  -',  11, '-') || CHR(10);
+        END IF;
+        
+        v_data := v_data || RPAD(TO_CHAR(rec.sess_no,'99999990') ||
+                            ' - ' || rec.sess_name || '.' || rec.step_name, c_step_size, ' ') ||
+                            LPAD(TO_CHAR(rec.dur,'99,999,990'), 11, ' ') || 
+                            LPAD(TO_CHAR(rec.rwx,'99,999,990'), 11, ' ') || 
+                            LPAD(TO_CHAR(rec.ins,'99,999,990'), 11, ' ') || 
+                            LPAD(TO_CHAR(rec.upd,'99,999,990'), 11, ' ') || 
+                            LPAD(TO_CHAR(rec.dlt,'99,999,990'), 11, ' ') || 
+                            LPAD(TO_CHAR(rec.err,'99,999,990'), 11, ' ') || CHR(10);
+        v_last_step    := rec.step_name;
+        v_last_sess_no := rec.sess_no;
+    END LOOP;
+
+    v_data := v_data || CHR(10) || '** End of job **' || CHR(10) ;
+    RETURN (SUBSTR(v_data, 1, 4000));
+    
+    EXCEPTION
+        WHEN OTHERS THEN RETURN ('ERROR in F_GET_STATS');     
+END;
+
+Starting ODI on Windows
+Start Node Manager
+From a CMD Prompt in Administration mode use the following from the User Domain in ODI to run in background:
+
+C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\bin>start /b startnodemanager
+C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\bin>NODEMGR_HOME is already set to C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager
+CLASSPATH=.;C:\PROGRA~1\Java\jdk1.8.0_231\lib\tools.jar;C:\Oracle\Middleware\ODI122\wlserver\server\lib\weblogic.jar;C:\Oracle\Middleware\ODI122\oracle_common\modules\thirdparty\ant-contrib-1.0b3.jar;C:\Oracle\Middleware\ODI122\wlserver\modules\features\oracle.wls.common.nodemanager.jar;;C:\Oracle\Middleware\ODI122\wlserver\modules\features\oracle.wls.common.grizzly.jar;C:\Oracle\Middleware\ODI122\oracle_common\modules\oracle.jps\jps-manifest.jar;C:\Oracle\Middleware\ODI122\wlserver\..\oracle_common\modules\oracle.odl\ojdl.jar;C:\Oracle\Middleware\ODI122\wlserver\..\oracle_common\common\lib\config-launch.jar
+
+C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager>"C:\PROGRA~1\Java\jdk1.8.0_231\bin\java.exe"  -server -Xms32m -Xmx200m -Djdk.tls.ephemeralDHKeySize=2048 -Dcoherence.home=C:\Oracle\Middleware\ODI122\coherence -Dbea.home=C:\Oracle\Middleware\ODI122  -Doracle.security.jps.config=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig\jps-config-jse.xml -Dcommon.components.home=C:\Oracle\Middleware\ODI122\oracle_common -Dopss.version=12.2.1.3 -Dweblogic.RootDirectory=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain  -Djava.system.class.loader=com.oracle.classloader.weblogic.LaunchClassLoader "-Djava.security.policy=C:\Oracle\Middleware\ODI122\wlserver\server\lib\weblogic.policy" "-Dweblogic.nodemanager.JavaHome=C:\PROGRA~1\Java\jdk1.8.0_231" weblogic.NodeManager -v
+Picked up JAVA_TOOL_OPTIONS: -Djava.vendor="New Oracle"
+<Feb 18, 2021 4:51:47 PM EST> <INFO> <Loading domains file: C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager\nodemanager.domains>
+<Feb 18, 2021 4:51:47 PM EST> <INFO> <Loading identity key store: FileName=kss://system/demoidentity, Type=kss, PassPhraseUsed=true>
+Feb 18, 2021 4:51:49 PM oracle.security.opss.internal.runtime.ServiceContextManagerImpl getContext
+WARNING: Bootstrap services are used by OPSS internally and clients should never need to directly read/write bootstrap credentials. If required, use Wlst or configuration management interfaces.
+<Feb 18, 2021 4:51:49 PM EST> <INFO> <Loaded NodeManager configuration properties from 'C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager\nodemanager.properties'>
+Node manager v12.2.1.3.0
+
+Configuration settings:
+
+DomainsFile=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager\nodemanager.domains
+LogLimit=0
+DomainsDirRemoteSharingEnabled=false
+AuthenticationEnabled=true
+LogLevel=INFO
+DomainsFileEnabled=true
+ListenAddress=swwvd-prg-4.sw.sherwin.com
+NativeVersionEnabled=true
+ProcessDestroyTimeout=20000
+ListenPort=5556
+LogToStderr=true
+weblogic.StartScriptName=startWebLogic.cmd
+SecureListener=true
+LogCount=1
+LogAppend=true
+weblogic.StopScriptEnabled=false
+StateCheckInterval=500
+CrashRecoveryEnabled=false
+weblogic.StartScriptEnabled=true
+LogFile=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager\nodemanager.log
+LogFormatter=weblogic.nodemanager.server.LogFormatter
+coherence.StartScriptEnabled=false
+ListenBacklog=50
+NodeManagerHome=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\nodemanager
+RestEnabled=false
+weblogic.startup.JavaHome=C:\PROGRA~1\Java\jdk1.8.0_231
+weblogic.startup.MW_Home=
+coherence.startup.JavaHome=C:\PROGRA~1\Java\jdk1.8.0_231
+coherence.startup.MW_Home=
+
+Domain name mappings:
+
+poc_domain -> C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain
+
+<Feb 18, 2021 4:51:49 PM EST> <INFO> <12.2.1.3.0>
+Feb 18, 2021 4:51:58 PM oracle.odi.agent
+INFO: Ignoring Exception in method isSupportsHeaderAuth() : Connection refused: connect
+<Feb 18, 2021 4:52:01 PM EST> <INFO> <Server Implementation Class: weblogic.nodemanager.server.NMServer$ClassicServer.>
+<Feb 18, 2021 4:52:01 PM EST> <INFO> <Secure socket listener started on port 5556, host swwvd-prg-4.sw.sherwin.com/10.156.224.55>
+Start Weblogic Server
+C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\bin>cd ..
+
+C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain>startweblogic
+.
+.
+JAVA Memory arguments: -Xms512m -Xmx2048m -XX:MaxPermSize=512m
+.
+CLASSPATH=C:\Oracle\Middleware\ODI122\oracle_common\modules\features\com.oracle.db.jdbc7-dms.jar;C:\PROGRA~1\Java\jdk1.8.0_231\lib\tools.jar;C:\Oracle\Middleware\ODI122\wlserver\server\lib\weblogic.jar;C:\Oracle\Middleware\ODI122\oracle_common\modules\thirdparty\ant-contrib-1.0b3.jar;C:\Oracle\Middleware\ODI122\wlserver\modules\features\oracle.wls.common.nodemanager.jar;C:\Oracle\Middleware\ODI122\oracle_common\modules\datadirect\*;C:\Oracle\Middleware\ODI122\oracle_common\modules\internal\features\jrf_wlsFmw_oracle.jrf.wls.classpath.jar;C:\Oracle\Middleware\ODI122\wlserver\common\derby\lib\derbynet.jar;C:\Oracle\Middleware\ODI122\wlserver\common\derby\lib\derbyclient.jar;C:\Oracle\Middleware\ODI122\wlserver\common\derby\lib\derby.jar
+.
+PATH=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\bin;;C:\Oracle\Middleware\ODI122\wlserver\server\native\win\x64;C:\Oracle\Middleware\ODI122\wlserver\server\bin;C:\Oracle\Middleware\ODI122\oracle_common\modules\thirdparty\org.apache.ant\1.9.8.0.0\apache-ant-1.9.8\bin;C:\PROGRA~1\Java\jdk1.8.0_231\jre\bin;C:\PROGRA~1\Java\jdk1.8.0_231\bin;C:\Oracle\Middleware\ODI122\wlserver\server\native\win\x64\oci920_8;C:\Oracle\product\18.0.0\dbhomeXE\bin;C:\Oracle\product\11.2.0\client_1\bin;C:\PROGRA~2\COMMON~1\Oracle\Java\javapath;C:\Windows\System32;C:\Windows;C:\Windows\System32\wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Oracle\instantclient_18_5-nt;C:\Oracle\instantclient_18_5-x64;C:\PROGRA~2\Hyland\Web;C:\PROGRA~2\PuTTY\;C:\Users\swadmin\AppData\Local\Microsoft\WindowsApps
+.
+***************************************************
+*  To start WebLogic Server, use a username and   *
+*  password assigned to an admin-level user.  For *
+*  server administration, use the WebLogic Server *
+*  console at http:\\hostname:port\console        *
+***************************************************
+Starting WLS with line:
+C:\PROGRA~1\Java\jdk1.8.0_231\bin\java -server   -Xms512m -Xmx2048m -XX:MaxPermSize=512m -cp C:\Oracle\Middleware\ODI122\wlserver\server\lib\weblogic-launcher.jar -Dlaunch.use.env.classpath=true -Dweblogic.Name=AdminServer -Djava.security.policy=C:\Oracle\Middleware\ODI122\wlserver\server\lib\weblogic.policy  -Dweblogic.ProductionModeEnabled=true -Djava.system.class.loader=com.oracle.classloader.weblogic.LaunchClassLoader -Djava.protocol.handler.pkgs="oracle.mds.net.protocol" -Doracle.odi.home=C:\Oracle\Middleware\ODI122\odi -Ddomain.home=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain -Dodi.shared.config.dir.path=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\oracledi -Dodi.console.config.dir=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain -Dopss.version=12.2.1.3 -Digf.arisidbeans.carmlloc=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig\carml -Digf.arisidstack.home=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig\arisidprovider -Doracle.security.jps.config=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig\jps-config.xml -Doracle.deployed.app.dir=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\AdminServer\tmp\_WL_user -Doracle.deployed.app.ext=\- -Dweblogic.alternateTypesDirectory=C:\Oracle\Middleware\ODI122\oracle_common\modules\oracle.ossoiap,C:\Oracle\Middleware\ODI122\oracle_common\modules\oracle.oamprovider,C:\Oracle\Middleware\ODI122\oracle_common\modules\oracle.jps -Doracle.mds.filestore.preferred= -Dadf.version=12.2.1.3.0 -Dweblogic.jdbc.remoteEnabled=true -Dcommon.components.home=C:\Oracle\Middleware\ODI122\oracle_common -Djrf.version=12.2.2 -Dorg.apache.commons.logging.Log=org.apache.commons.logging.impl.Jdk14Logger -Doracle.server.config.dir=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig\servers\AdminServer -Doracle.domain.config.dir=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\config\fmwconfig  -javaagent:C:\Oracle\Middleware\ODI122\wlserver\server\lib\debugpatch-agent.jar -da -Dwls.home=C:\Oracle\Middleware\ODI122\wlserver\server -Dweblogic.home=C:\Oracle\Middleware\ODI122\wlserver\server  -Djavax.management.builder.initial=weblogic.management.jmx.mbeanserver.WLSMBeanServerBuilder  -Djavax.management.builder.initial=weblogic.management.jmx.mbeanserver.WLSMBeanServerBuilder -Dem.oracle.home=C:\Oracle\Middleware\ODI122\em -DINSTANCE_HOME=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain -Djava.awt.headless=true -Doracle.sysman.util.logging.mode=dual_mode   -Djava.util.logging.manager=oracle.core.ojdl.logging.ODLLogManager  weblogic.Server
+Picked up JAVA_TOOL_OPTIONS: -Djava.vendor="New Oracle"
+Java HotSpot(TM) 64-Bit Server VM warning: ignoring option MaxPermSize=512m; support was removed in 8.0
+<Feb 18, 2021 4:52:21 PM EST> <Info> <Security> <BEA-090905> <Disabling the CryptoJ JCE Provider self-integrity check for better startup performance. To enable this check, specify -Dweblogic.security.allowCryptoJDefaultJCEVerification=true.>
+<Feb 18, 2021 4:52:21 PM EST> <Info> <Security> <BEA-090906> <Changing the default Random Number Generator in RSA CryptoJ from ECDRBG128 to HMACDRBG. To disable this change, specify -Dweblogic.security.allowCryptoJDefaultPRNG=true.>
+<Feb 18, 2021 4:52:22 PM EST> <Info> <WebLogicServer> <BEA-000377> <Starting WebLogic Server with Java HotSpot(TM) 64-Bit Server VM Version 25.231-b11 from Oracle Corporation.>
+Feb 18, 2021 4:52:22 PM oracle.security.jps.wls.JpsBootStrapService start
+INFO: JPS bootstrap service started.
+<Feb 18, 2021 4:52:22 PM EST> <Info> <RCM> <BEA-2165021> <"ResourceManagement" is not enabled in this JVM. Enable "ResourceManagement" to use the WebLogic Server "Resource Consumption Management" feature. To enable "ResourceManagement", you must specify the following JVM options in the WebLogic Server instance in which the JVM runs: -XX:+UnlockCommercialFeatures -XX:+ResourceManagement.>
+<Feb 18, 2021 4:52:22 PM EST> <Info> <Management> <BEA-141107> <Version: WebLogic Server 12.2.1.3.0 Thu Aug 17 13:39:49 PDT 2017 1882952>
+<Feb 18, 2021 4:52:24 PM EST> <Info> <Security> <BEA-090065> <Getting boot identity from user.>
+Enter username to boot WebLogic server:weblogic
+Enter password to boot WebLogic server:
+<Feb 18, 2021 4:52:48 PM EST> <Notice> <WebLogicServer> <BEA-000365> <Server state changed to STARTING.>
+<Feb 18, 2021 4:52:48 PM EST> <Info> <WorkManager> <BEA-002900> <Initializing self-tuning thread pool.>
+<Feb 18, 2021 4:52:48 PM EST> <Info> <WorkManager> <BEA-002942> <CMM memory level becomes 0. Setting standby thread pool size to 256.>
+Feb 18, 2021 4:52:49 PM oracle.security.jps.wls.JpsDefaultService start
+INFO: JPS default service started.
+Feb 18, 2021 4:52:49 PM oracle.security.jps.JpsStartup startWithRetry
+INFO: Jps initializing.
+<Feb 18, 2021 4:52:49,113 PM EST> <Notice> <Log Management> <BEA-170019> <The server log file weblogic.logging.FileStreamHandler instance=1145413136
+Current log file=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\AdminServer\logs\AdminServer.log
+Rotation dir=C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\AdminServer\logs
+ is opened. All server side log events will be written to this file.>
+Feb 18, 2021 4:52:49 PM oracle.security.jps.internal.idstore.util.LibOvdUtil pushLdapNamesToLibOvd
+INFO: Pushed ldap name and types info to libOvd. Ldaps : DefaultAuthenticator:idstore.ldap.provideridstore.ldap.
+Feb 18, 2021 4:52:52 PM org.hibernate.validator.internal.util.Version <clinit>
+INFO: HV000001: Hibernate Validator 5.1.3.Final
+Feb 18, 2021 4:52:54 PM oracle.security.jps.internal.common.util.JpsCommonUtil initPolicyProvider
+INFO: Initializing OPSS Java Policy Provider.
+Feb 18, 2021 4:52:54 PM oracle.security.jps.internal.common.util.JpsCommonUtil initPolicyProvider
+INFO: OPSS Java Policy Provider initialized.
+Feb 18, 2021 4:52:54 PM oracle.security.jps.internal.common.util.JpsCommonUtil initPolicyProvider
+INFO: OPSS Java Policy Provider is set as the system-wide Policy object.
+Feb 18, 2021 4:52:54 PM oracle.security.jps.JpsStartup startWithRetry
+INFO: Jps started.
+<Feb 18, 2021 4:52:54,397 PM EST> <Notice> <Security> <BEA-090946> <Security pre-initializing using security realm: myrealm>
+<Feb 18, 2021 4:52:54,820 PM EST> <Notice> <Security> <BEA-090947> <Security post-initializing using security realm: myrealm>
+<Feb 18, 2021 4:52:55,443 PM EST> <Notice> <Security> <BEA-090082> <Security initialized using administrative security realm: myrealm>
+<Feb 18, 2021 4:52:55,676 PM EST> <Notice> <JMX> <BEA-149512> <JMX Connector Server started at service:jmx:iiop://swwvd-prg-4.sw.sherwin.com:7001/jndi/weblogic.management.mbeanservers.runtime.>
+<Feb 18, 2021 4:52:56,116 PM EST> <Notice> <Security> <BEA-090171> <Loading the identity certificate and private key stored under the alias DemoIdentity from the kss keystore file kss://system/demoidentity.>
+Feb 18, 2021 4:52:56 PM oracle.security.opss.internal.runtime.ServiceContextManagerImpl getContext
+WARNING: Bootstrap services are used by OPSS internally and clients should never need to directly read/write bootstrap credentials. If required, use Wlst or configuration management interfaces.
+<Feb 18, 2021 4:52:56,151 PM EST> <Alert> <Security> <BEA-090153> <Demo identity certificate is used in production mode: [
+
+
+O
+O
+O
+
+<Feb 18, 2021 4:53:43,677 PM EST> <Notice> <WebLogicServer> <BEA-000365> <Server state changed to ADMIN.>
+<Feb 18, 2021 4:53:43,759 PM EST> <Notice> <WebLogicServer> <BEA-000365> <Server state changed to RESUMING.>
+<Feb 18, 2021 4:53:43,759 PM EST> <Notice> <JMX> <BEA-149535> <JMX Resiliency Activity Server=All Servers : Resolving connection list DomainRuntimeServiceMBean>
+<Feb 18, 2021 4:53:44,056 PM EST> <Notice> <WebLogicServer> <BEA-000329> <Started the WebLogic Server Administration Server "AdminServer" for domain "poc_domain" running in production mode.>
+<Feb 18, 2021 4:53:44,056 PM EST> <Notice> <Server> <BEA-002613> <Channel "Default" is now listening on 10.156.224.55:7001 for protocols iiop, t3, ldap, snmp, http.>
+<Feb 18, 2021 4:53:44,056 PM EST> <Notice> <WebLogicServer> <BEA-000360> <The server started in RUNNING mode.>
+<Feb 18, 2021 4:53:44,056 PM EST> <Notice> <Server> <BEA-002613> <Channel "Default" is now listening on 10.156.224.55:7001 for protocols iiop, t3, ldap, snmp, http.>
+<Feb 18, 2021 4:53:44,072 PM EST> <Notice> <WebLogicServer> <BEA-000365> <Server state changed to RUNNING.>
+<Feb 18, 2021 4:53:54,039 PM EST> <Warning> <Socket> <BEA-000449> <Closing the socket, as no data read from it on 10.156.224.55:61,120 during the configured idle timeout of 5 seconds.>
+<Feb 18, 2021 4:54:09,053 PM EST> <Warning> <Socket> <BEA-000449> <Closing the socket, as no data read from it on 10.156.224.55:61,122 during the configured idle timeout of 5 seconds.>
+<Feb 18, 2021 4:54:17,028 PM EST> <Warning> <NodeManager> <BEA-300057> <Starting server ODI_POC_server1 on machine ODI_POC_machine1 at swwvd-prg-4.sw.sherwin.com:5556>
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Creating directory "C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\logs">
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Creating directory "C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\security">
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Creating directory "C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\tmp">
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Boot identity properties saved to "C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\data\nodemanager\boot.properties">
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Startup configuration properties saved to "C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\data\nodemanager\startup.properties">
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Starting WebLogic server with command line: C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\bin\startWebLogic.cmd >
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Working directory is 'C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain'>
+<Feb 18, 2021 4:54:17 PM EST> <INFO> <poc_domain> <ODI_POC_server1> <Server output log file is 'C:\Oracle\Middleware\ODI122\user_projects\domains\poc_domain\servers\ODI_POC_server1\logs\ODI_POC_server1.out'>
+Server Changed to RUNNING is the flag that the weblogic server is executing.
+
+Start Managed Server
+Use the following URL to start the Managed Server:
+http://swwvd-prg-4.sw.sherwin.com:7001/console/login/LoginForm.jsp
+ 
+Use the “weblogic1” password.
+Go to the server using:
+Domain Structure -> Environment -> Servers -> Summary of Servers -> Contol
+Check the ODI_POC_server1 and push the button Start.
+Push the Recycle Refresh button above until is switches from STARTING to RUNNING status.
+ 
+
+STOPPING ODI on Windows
+Stopping Managed Server
+Using the Start Managed Server steps, replace the Start with Shutdown instruction to shut down the Managed Server.
+Stopping Weblogic Server and Node Manager
+You can use Contol-Break on the CMD Prompt window to shut down Child Processes (Weblogic then Node Manager.  If these keys are not available on your keyboard then you can also use the Task Manager to “End Task” on the Child until you end up to the Parent Admin Window Task.
+
+Adding ODI Server Drivers
+One can go to the lib dir of the user domain and copy the needed drivers over to this directory and then restarting the Managed Server:
+ 
+Starting ODI Framework Agents
+Create OracleDI Agent using ODI Studio
+ 
+ 
+ 
+
+Push the “Test” button to test connection to see the following:
+ 
+
